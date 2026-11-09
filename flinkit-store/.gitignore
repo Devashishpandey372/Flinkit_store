@@ -1,0 +1,25 @@
+# Flinkit Store
+
+## Environment
+node_modules/
+*.env
+**/.env
+dist/
+build/
+*.log
+
+## OS
+.DS_Store
+Thumbs.db
+
+## Editor
+.vscode/settings.json
+.idea/
+
+## Frontend Build
+frontend/dist/
+frontend/node_modules/
+
+## Backend Build
+backend/node_modules/
+backend/dist/

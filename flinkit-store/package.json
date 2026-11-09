@@ -1,0 +1,22 @@
+{
+  "name": "flinkit-store-root",
+  "version": "1.0.0",
+  "description": "Flinkit Store - Online Grocery Delivery Platform",
+  "private": true,
+  "scripts": {
+    "install:all": "npm install && npm --prefix backend install && npm --prefix frontend install",
+    "dev": "concurrently \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build:frontend": "npm --prefix frontend run build",
+    "build:backend": "npm --prefix backend run build",
+    "seed": "npm --prefix backend run seed",
+    "seed:admin": "npm --prefix backend run seed:admin",
+    "lint:frontend": "npm --prefix frontend run lint",
+    "lint:backend": "npm --prefix backend run lint",
+    "test:backend": "npm --prefix backend run test"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
