@@ -53,11 +53,11 @@ const createOrder = async (req, res, next) => {
     for (const item of cart.items) {
       const product = await Product.findById(item.product._id, null, sessionOption);
 
-      if (!product || !product.isActive) {
+      if (!product || !product.isActive || product.availabilityStatus === 'out_of_stock') {
         if (session) await session.abortTransaction();
         return res.status(400).json({
           success: false,
-          message: `Product "${item.product.name}" is no longer available.`,
+          message: `Product "${item.product.name}" is out of stock or unavailable.`,
         });
       }
 

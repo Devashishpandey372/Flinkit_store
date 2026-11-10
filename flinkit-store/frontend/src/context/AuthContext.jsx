@@ -82,7 +82,28 @@ export const AuthProvider = ({ children }) => {
     toast.success('Password changed successfully');
   }, []);
 
+  const adminLogin = useCallback(async (email, password) => {
+    const res = await api.post('/admin/auth/login', { email, password });
+    const { user: loggedInUser, token } = res.data.data;
+    localStorage.setItem('flinkit_token', token);
+    localStorage.setItem('flinkit_user', JSON.stringify(loggedInUser));
+    setUser(loggedInUser);
+    return loggedInUser;
+  }, []);
+
+  const adminSignup = useCallback(async (data) => {
+    const res = await api.post('/admin/auth/register', data);
+    const { user: newUser, token } = res.data.data;
+    localStorage.setItem('flinkit_token', token);
+    localStorage.setItem('flinkit_user', JSON.stringify(newUser));
+    setUser(newUser);
+    return { user: newUser, isApproved: res.data.data.isApproved };
+  }, []);
+
   const isAdmin = user?.role === 'admin';
+  const isShopkeeper = user?.role === 'shopkeeper';
+  const isApproved = user?.isApproved !== false;
+  const canAccessAdmin = isAdmin || (isShopkeeper && isApproved);
   const isAuthenticated = !!user;
 
   return (
@@ -92,8 +113,13 @@ export const AuthProvider = ({ children }) => {
         loading,
         isAuthenticated,
         isAdmin,
+        isShopkeeper,
+        isApproved,
+        canAccessAdmin,
         login,
         signup,
+        adminLogin,
+        adminSignup,
         logout,
         updateUser,
         updateProfile,

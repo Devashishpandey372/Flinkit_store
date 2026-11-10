@@ -18,6 +18,9 @@ import Profile from './pages/Profile';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import AdminDashboard from './pages/AdminDashboard';
+import AdminLogin from './pages/AdminLogin';
+import AdminSignup from './pages/AdminSignup';
+import AdminSetup from './pages/AdminSetup';
 import About from './pages/About';
 import Contact from './pages/Contact';
 import PrivacyPolicy from './pages/PrivacyPolicy';
@@ -54,7 +57,9 @@ function App() {
                 <Route path="/cart" element={<CartPage />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/signup" element={<Signup />} />
-                <Route path="/admin/login" element={<Navigate to="/login" replace />} />
+                <Route path="/admin/login" element={<AdminLogin />} />
+                <Route path="/admin/signup" element={<AdminSignup />} />
+                <Route path="/admin/setup" element={<AdminSetup />} />
 
                 {/* Public Policy & Company Pages (Mandatory for Razorpay LIVE Verification) */}
                 <Route path="/about" element={<About />} />
@@ -112,11 +117,11 @@ function App() {
                   }
                 />
 
-                {/* Admin Protected Routes */}
+                {/* Admin & Shopkeeper Protected Routes */}
                 <Route
                   path="/admin/dashboard"
                   element={
-                    <ProtectedRoute adminOnly>
+                    <ProtectedRoute adminOrShopkeeper>
                       <AdminDashboard />
                     </ProtectedRoute>
                   }

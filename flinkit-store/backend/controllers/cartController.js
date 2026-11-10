@@ -32,7 +32,7 @@ const addToCart = async (req, res, next) => {
     if (!product) {
       return res.status(404).json({ success: false, message: 'Product not found or unavailable.' });
     }
-    if (product.stock < 1) {
+    if (product.stock < 1 || product.availabilityStatus === 'out_of_stock') {
       return res.status(400).json({ success: false, message: 'Product is out of stock.' });
     }
 

@@ -19,6 +19,8 @@ const ProductCard = ({ product }) => {
     ((product.originalPrice - product.sellingPrice) / product.originalPrice) * 100
   );
 
+  const isOutOfStock = product.stock === 0 || product.availabilityStatus === 'out_of_stock';
+
   const handleAdd = async (e) => {
     e.preventDefault();
     setIsAdding(true);
@@ -56,7 +58,7 @@ const ProductCard = ({ product }) => {
             {discount}% OFF
           </span>
         )}
-        {product.stock === 0 && (
+        {isOutOfStock && (
           <div className="absolute inset-0 bg-white/70 flex items-center justify-center">
             <span className="badge-outofstock text-sm px-3 py-1">Out of Stock</span>
           </div>
@@ -65,7 +67,7 @@ const ProductCard = ({ product }) => {
 
       {/* Info */}
       <div className="p-3">
-        <p className="text-xs text-gray-400 mb-0.5">{product.unit}</p>
+        <p className="text-xs text-gray-400 mb-0.5">{product.unit} {product.brand ? `• ${product.brand}` : ''}</p>
         <h3 className="text-sm font-semibold text-gray-900 leading-tight line-clamp-2 mb-2 min-h-[2.5rem]">
           {product.name}
         </h3>
@@ -79,7 +81,7 @@ const ProductCard = ({ product }) => {
             )}
           </div>
 
-          {product.stock > 0 && (
+          {!isOutOfStock && (
             quantity > 0 ? (
               <div
                 className="flex items-center gap-1.5 bg-primary-600 rounded-xl overflow-hidden"

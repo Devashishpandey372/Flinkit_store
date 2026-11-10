@@ -107,7 +107,14 @@ const ProductDetail = () => {
             </div>
 
             <h1 className="text-2xl md:text-3xl font-black text-gray-900 mb-2">{product.name}</h1>
-            <p className="text-sm text-gray-500 font-medium mb-4">Pack Size: {product.unit}</p>
+            <p className="text-sm text-gray-500 font-medium mb-2">
+              Pack Size: {product.unit} {product.brand ? `• Brand: ${product.brand}` : ''}
+            </p>
+            {product.shopName && (
+              <p className="text-xs text-emerald-700 font-semibold mb-4">
+                Sold by: {product.shopName} (Verified Partner)
+              </p>
+            )}
 
             <div className="flex items-baseline gap-3 mb-6">
               <span className="text-3xl font-black text-gray-900">₹{product.sellingPrice}</span>
@@ -121,6 +128,12 @@ const ProductDetail = () => {
               )}
             </div>
 
+            {product.shortDescription && (
+              <p className="text-sm text-gray-700 font-medium mb-4 italic">
+                &quot;{product.shortDescription}&quot;
+              </p>
+            )}
+
             <div className="border-t border-b border-gray-100 py-4 mb-6">
               <h3 className="text-sm font-bold text-gray-900 mb-2">Description</h3>
               <p className="text-sm text-gray-600 leading-relaxed">
@@ -131,7 +144,7 @@ const ProductDetail = () => {
 
           <div>
             {/* Actions */}
-            {product.stock > 0 ? (
+            {product.stock > 0 && product.availabilityStatus !== 'out_of_stock' ? (
               quantity > 0 ? (
                 <div className="flex items-center gap-4">
                   <div className="inline-flex items-center gap-3 bg-primary-600 rounded-xl px-4 py-2">

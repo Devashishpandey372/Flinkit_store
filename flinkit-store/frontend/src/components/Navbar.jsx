@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 
 const Navbar = () => {
-  const { user, isAuthenticated, isAdmin, logout } = useAuth();
+  const { user, isAuthenticated, isAdmin, isShopkeeper, logout } = useAuth();
   const { cartCount, openDrawer } = useCart();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
@@ -81,10 +81,10 @@ const Navbar = () => {
 
                 {showUserMenu && (
                   <div className="absolute right-0 top-full mt-2 w-52 bg-white rounded-2xl shadow-lg border border-gray-100 py-2 z-50 scale-in" id="nav-user-dropdown">
-                    {isAdmin && (
+                    {(isAdmin || isShopkeeper) && (
                       <Link to="/admin/dashboard" onClick={() => setShowUserMenu(false)}
                         className="flex items-center gap-2 px-4 py-2.5 text-sm text-primary-700 font-semibold hover:bg-primary-50 transition-colors">
-                        <Package className="w-4 h-4" /> Admin Dashboard
+                        <Package className="w-4 h-4" /> {isAdmin ? 'Admin Dashboard' : 'Merchant Dashboard'}
                       </Link>
                     )}
                     <Link to="/profile" onClick={() => setShowUserMenu(false)}
@@ -152,7 +152,7 @@ const Navbar = () => {
                     <p className="text-xs text-gray-500">{user?.email}</p>
                   </div>
                 </div>
-                {isAdmin && <Link to="/admin/dashboard" className="block px-3 py-2 text-sm font-semibold text-primary-600 hover:bg-primary-50 rounded-lg" onClick={() => setMobileMenuOpen(false)}>Admin Dashboard</Link>}
+                {(isAdmin || isShopkeeper) && <Link to="/admin/dashboard" className="block px-3 py-2 text-sm font-semibold text-primary-600 hover:bg-primary-50 rounded-lg" onClick={() => setMobileMenuOpen(false)}>{isAdmin ? 'Admin Dashboard' : 'Merchant Dashboard'}</Link>}
                 <Link to="/profile" className="block px-3 py-2 text-sm hover:bg-gray-50 rounded-lg" onClick={() => setMobileMenuOpen(false)}>My Profile</Link>
                 <Link to="/my-orders" className="block px-3 py-2 text-sm hover:bg-gray-50 rounded-lg" onClick={() => setMobileMenuOpen(false)}>My Orders</Link>
                 <button onClick={handleLogout} className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg">Logout</button>

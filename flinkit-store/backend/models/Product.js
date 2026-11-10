@@ -13,6 +13,12 @@ const productSchema = new mongoose.Schema(
       unique: true,
       lowercase: true,
     },
+    shortDescription: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: [500, 'Short description cannot exceed 500 characters'],
+    },
     description: {
       type: String,
       default: '',
@@ -23,9 +29,43 @@ const productSchema = new mongoose.Schema(
       ref: 'Category',
       required: [true, 'Category is required'],
     },
+    subcategory: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    brand: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    sku: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     image: {
       type: String,
       default: 'https://via.placeholder.com/400x400?text=Product',
+    },
+    images: {
+      type: [String],
+      default: [],
+    },
+    availabilityStatus: {
+      type: String,
+      enum: ['available', 'out_of_stock'],
+      default: 'available',
+    },
+    shopkeeper: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    shopName: {
+      type: String,
+      trim: true,
+      default: '',
     },
     unit: {
       type: String,
@@ -90,6 +130,20 @@ productSchema.index({ category: 1, isActive: 1 });
 productSchema.index({ isFeatured: 1, isActive: 1 });
 productSchema.index({ sellingPrice: 1 });
 productSchema.index({ stock: 1 });
+productSchema.index({ shopkeeper: 1, isActive: 1 });
+
+// Ensure image & images consistency before save
+productSchema.pre('save', function (next) {
+  if (this.images && this.images.length > 0 && (!this.image || this.image.includes('placeholder'))) {
+    this.image = this.images[0];
+  } else if (this.image && (!this.images || this.images.length === 0)) {
+    this.images = [this.image];
+  }
+  if (this.stock === 0 && !this.isModified('availabilityStatus')) {
+    this.availabilityStatus = 'out_of_stock';
+  }
+  next();
+});
 
 // Virtual for discount percentage
 productSchema.virtual('discountPercent').get(function () {

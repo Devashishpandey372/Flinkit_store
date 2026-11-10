@@ -5,6 +5,7 @@ const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 
 const authRoutes = require('./routes/authRoutes');
 const productRoutes = require('./routes/productRoutes');
@@ -19,7 +20,7 @@ const { errorHandler, notFound } = require('./middleware/errorMiddleware');
 const app = express();
 
 // ─── Security ────────────────────────────────────────────────
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 
 // CORS — support production Vercel frontend, custom domains, and local development
 const allowedOrigins = process.env.FRONTEND_URL
@@ -46,6 +47,12 @@ app.use(
   })
 );
 
+// ─── Trust Proxy for Render / Production Reverse Proxies ─────
+// Behind Render's reverse proxy load balancer (1 hop).
+// Setting trust proxy to 1 ensures express-rate-limit resolves client IP correctly
+// without trusting arbitrary spoofed X-Forwarded-For headers from upstream.
+app.set('trust proxy', 1);
+
 // Global rate limiter
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -57,13 +64,19 @@ const globalLimiter = rateLimit({
 app.use(globalLimiter);
 
 // ─── Body Parsing ─────────────────────────────────────────────
-// Webhook route needs raw body — mount it BEFORE json middleware
+// Webhook routes need raw body — mount BEFORE express.json middleware
 app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
+if (process.env.NODE_ENV !== 'production') {
+  app.use('/api/payments/dev/replay-webhook', express.raw({ type: 'application/json' }));
+}
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 app.use(compression());
+
+// Static uploads directory
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ─── Logging ──────────────────────────────────────────────────
 if (process.env.NODE_ENV !== 'test') {

@@ -24,7 +24,12 @@ api.interceptors.response.use(
 
     // Only redirect if it is a genuine session authentication failure,
     // NOT from login/signup attempts or third-party payment endpoints
-    const isLoginOrSignup = url.includes('/auth/login') || url.includes('/auth/signup');
+    const isLoginOrSignup =
+      url.includes('/auth/login') ||
+      url.includes('/auth/signup') ||
+      url.includes('/admin/auth/') ||
+      url.includes('/admin/login') ||
+      url.includes('/admin/register');
     const isPaymentEndpoint = url.includes('/payments/');
 
     if (status === 401 && !isLoginOrSignup && !isPaymentEndpoint) {
@@ -32,9 +37,13 @@ api.interceptors.response.use(
       localStorage.removeItem('flinkit_user');
       const pathname = window.location.pathname;
       const search = window.location.search;
-      if (!['/login', '/signup', '/admin/login'].includes(pathname)) {
+      if (!['/login', '/signup', '/admin/login', '/admin/signup'].includes(pathname)) {
         const redirectParam = encodeURIComponent(pathname + search);
-        window.location.href = `/login?redirect=${redirectParam}`;
+        if (pathname.startsWith('/admin')) {
+          window.location.href = `/admin/login?redirect=${redirectParam}`;
+        } else {
+          window.location.href = `/login?redirect=${redirectParam}`;
+        }
       }
     }
     return Promise.reject(error);
@@ -91,12 +100,28 @@ export const paymentService = {
   verifyPayment: (data) => api.post('/payments/verify', data),
 };
 
+export const adminAuthService = {
+  getSetupStatus: () => api.get('/admin/setup/status'),
+  setupInitialAdmin: (data) => api.post('/admin/setup/initial-admin', data),
+  register: (data) => api.post('/admin/auth/register', data),
+  login: (credentials) => api.post('/admin/auth/login', credentials),
+  getMe: () => api.get('/admin/auth/me'),
+  updateProfile: (data) => api.patch('/admin/auth/profile', data),
+};
+
 export const adminService = {
   getDashboard: () => api.get('/admin/dashboard'),
   getProducts: (params) => api.get('/admin/products', { params }),
+  getProductById: (id) => api.get(`/admin/products/${id}`),
   createProduct: (data) => api.post('/admin/products', data),
   updateProduct: (id, data) => api.patch(`/admin/products/${id}`, data),
   deleteProduct: (id) => api.delete(`/admin/products/${id}`),
+  updateStock: (id, data) => api.patch(`/admin/products/${id}/stock`, data),
+  updateAvailability: (id, data) => api.patch(`/admin/products/${id}/availability`, data),
+  uploadImage: (formData) =>
+    api.post('/admin/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
   getOrders: (params) => api.get('/admin/orders', { params }),
   updateOrderStatus: (id, data) => api.patch(`/admin/orders/${id}/status`, data),
   getUsers: (params) => api.get('/admin/users', { params }),
@@ -105,6 +130,11 @@ export const adminService = {
   createCategory: (data) => api.post('/admin/categories', data),
   updateCategory: (id, data) => api.patch(`/admin/categories/${id}`, data),
   deleteCategory: (id) => api.delete(`/admin/categories/${id}`),
+  getShopkeepers: (params) => api.get('/admin/shopkeepers', { params }),
+  inviteShopkeeper: (data) => api.post('/admin/shopkeepers/invite', data),
+  updateShopkeeperStatus: (id, data) => api.patch(`/admin/shopkeepers/${id}/status`, data),
+  approveShopkeeper: (id, isApproved) => api.patch(`/admin/shopkeepers/${id}/status`, { action: isApproved ? 'approve' : 'reject' }),
+  deleteShopkeeper: (id) => api.delete(`/admin/shopkeepers/${id}`),
 };
 
 export default api;

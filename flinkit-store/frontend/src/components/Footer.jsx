@@ -55,7 +55,9 @@ const Footer = () => {
                 ['Contact Customer Support', '/contact'],
                 ['Track My Orders', '/my-orders'],
                 ['My Account Profile', '/profile'],
-                ['Sign In / Register', '/login'],
+                ['Customer Sign In', '/login'],
+                ['Sell on Flinkit (Merchant Portal)', '/admin/login'],
+                ['Partner Registration', '/admin/signup'],
               ].map(([label, href]) => (
                 <li key={label}>
                   <Link to={href} className="text-xs text-gray-400 hover:text-primary-400 transition-colors">
