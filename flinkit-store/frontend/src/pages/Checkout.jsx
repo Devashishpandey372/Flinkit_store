@@ -177,14 +177,18 @@ const Checkout = () => {
               },
             });
           } catch (verifyErr) {
-            toast.error(verifyErr.response?.data?.message || 'Payment verification failed');
+            if (verifyErr.code === 'ECONNABORTED' || verifyErr.message?.includes('timeout')) {
+              toast.error('Network timeout during payment verification. Please check My Orders to see your order status.');
+            } else {
+              toast.error(verifyErr.response?.data?.message || 'Payment verification failed: cryptographic signature mismatch.');
+            }
             navigate('/my-orders');
           }
         },
         // Step e: Handle modal closure gracefully
         modal: {
           ondismiss: () => {
-            toast('Payment modal closed. You can review your order in My Orders.', { icon: 'ℹ️' });
+            toast('Payment cancelled: Modal closed. Your order is safely saved in My Orders where you can complete payment.', { icon: 'ℹ️' });
             fetchCart();
             navigate('/my-orders');
           },
@@ -193,7 +197,14 @@ const Checkout = () => {
 
       const rzp = new window.Razorpay(options);
       rzp.on('payment.failed', (response) => {
-        toast.error(response.error?.description || 'Payment failed. Please try again.');
+        const error = response.error || {};
+        if (error.source === 'gateway' || error.reason === 'gateway_error') {
+          toast.error(`Gateway Technical Error: ${error.description || 'Payment gateway encountered a bank communication issue. Please retry.'}`);
+        } else if (error.reason === 'payment_failed') {
+          toast.error(`Payment Failed: ${error.description || 'Transaction declined by bank or card issuer.'}`);
+        } else {
+          toast.error(`Payment Error: ${error.description || 'Payment could not be completed.'}`);
+        }
       });
       rzp.open();
     } catch (err) {

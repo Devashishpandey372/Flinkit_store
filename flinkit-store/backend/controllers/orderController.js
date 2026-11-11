@@ -8,7 +8,28 @@ const DELIVERY_FEE = 40;
 const FREE_DELIVERY_THRESHOLD = 499;
 
 /**
- * POST /api/orders  — create a new order (stock reservation)
+ * Compensating rollback helper when MongoDB multi-document transactions are unavailable
+ */
+const rollbackDeductions = async (deductedItems, sessionOption = {}) => {
+  if (!deductedItems || deductedItems.length === 0) return;
+  for (const ded of deductedItems) {
+    try {
+      await Product.findByIdAndUpdate(
+        ded.productId,
+        { $inc: { stock: ded.quantity } },
+        sessionOption
+      );
+    } catch (err) {
+      console.error(
+        `[Inventory Rollback] Failed to restore stock for product ${ded.productId}:`,
+        err?.message || err
+      );
+    }
+  }
+};
+
+/**
+ * POST /api/orders  — create a new order (atomic stock reservation)
  */
 const createOrder = async (req, res, next) => {
   const desc = mongoose.connection?.client?.topology?.description;
@@ -23,6 +44,7 @@ const createOrder = async (req, res, next) => {
   }
 
   const sessionOption = session ? { session } : {};
+  const deductedItems = [];
 
   try {
     const { addressId, paymentMethod } = req.body;
@@ -46,47 +68,80 @@ const createOrder = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Cart is empty.' });
     }
 
-    // Build order items and validate stock
+    // Build order items and atomically reserve stock
     const orderItems = [];
     let subtotal = 0;
 
     for (const item of cart.items) {
-      const product = await Product.findById(item.product._id, null, sessionOption);
+      const productId = item.product?._id || item.product;
+      const requestedQty = Number(item.quantity);
 
-      if (!product || !product.isActive || product.availabilityStatus === 'out_of_stock') {
-        if (session) await session.abortTransaction();
+      if (!requestedQty || requestedQty <= 0) {
+        if (session) {
+          await session.abortTransaction();
+        } else {
+          await rollbackDeductions(deductedItems);
+        }
         return res.status(400).json({
           success: false,
-          message: `Product "${item.product.name}" is out of stock or unavailable.`,
+          message: 'Invalid item quantity.',
         });
       }
 
-      if (product.stock < item.quantity) {
-        if (session) await session.abortTransaction();
-        return res.status(400).json({
-          success: false,
-          message: `Only ${product.stock} unit(s) of "${product.name}" available.`,
-        });
-      }
-
-      // Deduct stock atomically
-      await Product.findByIdAndUpdate(
-        product._id,
-        { $inc: { stock: -item.quantity } },
-        sessionOption
+      // Concurrency-safe atomic deduction:
+      // Decrements stock ONLY IF current stock >= requestedQty AND product is active & not out of stock
+      const updatedProduct = await Product.findOneAndUpdate(
+        {
+          _id: productId,
+          stock: { $gte: requestedQty },
+          isActive: true,
+          availabilityStatus: { $ne: 'out_of_stock' },
+        },
+        {
+          $inc: { stock: -requestedQty },
+        },
+        {
+          new: true,
+          ...sessionOption,
+        }
       );
 
-      orderItems.push({
-        product: product._id,
-        name: product.name,
-        image: product.image,
-        unit: product.unit,
-        sellingPrice: product.sellingPrice,
-        originalPrice: product.originalPrice,
-        quantity: item.quantity,
+      if (!updatedProduct) {
+        if (session) {
+          await session.abortTransaction();
+        } else {
+          await rollbackDeductions(deductedItems);
+        }
+
+        const currentProduct = await Product.findById(productId, null, sessionOption);
+        if (!currentProduct || !currentProduct.isActive || currentProduct.availabilityStatus === 'out_of_stock') {
+          return res.status(400).json({
+            success: false,
+            message: `Product "${item.product?.name || 'Item'}" is out of stock or unavailable.`,
+          });
+        }
+        return res.status(400).json({
+          success: false,
+          message: `Only ${currentProduct.stock} unit(s) of "${currentProduct.name}" available.`,
+        });
+      }
+
+      deductedItems.push({
+        productId,
+        quantity: requestedQty,
       });
 
-      subtotal += product.sellingPrice * item.quantity;
+      orderItems.push({
+        product: updatedProduct._id,
+        name: updatedProduct.name,
+        image: updatedProduct.image,
+        unit: updatedProduct.unit,
+        sellingPrice: updatedProduct.sellingPrice,
+        originalPrice: updatedProduct.originalPrice,
+        quantity: requestedQty,
+      });
+
+      subtotal += updatedProduct.sellingPrice * requestedQty;
     }
 
     const deliveryFee = subtotal >= FREE_DELIVERY_THRESHOLD ? 0 : DELIVERY_FEE;
@@ -117,6 +172,7 @@ const createOrder = async (req, res, next) => {
       paymentMethod,
       paymentStatus: 'pending',
       fulfillmentStatus: 'placed',
+      isStockRestored: false,
     };
 
     let order;
@@ -142,6 +198,8 @@ const createOrder = async (req, res, next) => {
   } catch (error) {
     if (session) {
       await session.abortTransaction();
+    } else {
+      await rollbackDeductions(deductedItems);
     }
     next(error);
   } finally {
@@ -205,30 +263,41 @@ const cancelOrder = async (req, res, next) => {
     const { id } = req.params;
     const { cancellationReason } = req.body || {};
 
-    const order = await Order.findOne({ _id: id, user: req.user._id });
-    if (!order) {
-      return res.status(404).json({ success: false, message: 'Order not found.' });
-    }
+    // Concurrency-safe atomic state transition:
+    // Only match if fulfillmentStatus is 'placed' or 'confirmed' AND stock hasn't already been restored
+    const order = await Order.findOneAndUpdate(
+      {
+        _id: id,
+        user: req.user._id,
+        fulfillmentStatus: { $in: ['placed', 'confirmed'] },
+        isStockRestored: { $ne: true },
+      },
+      {
+        $set: {
+          fulfillmentStatus: 'cancelled',
+          cancelledAt: new Date(),
+          isStockRestored: true,
+          ...(cancellationReason ? { cancellationReason } : {}),
+        },
+      },
+      { new: true }
+    );
 
-    if (!['placed', 'confirmed'].includes(order.fulfillmentStatus)) {
+    if (!order) {
+      const existing = await Order.findOne({ _id: id, user: req.user._id });
+      if (!existing) {
+        return res.status(404).json({ success: false, message: 'Order not found.' });
+      }
       return res.status(400).json({
         success: false,
-        message: `Order cannot be cancelled in "${order.fulfillmentStatus}" status.`,
+        message: `Order cannot be cancelled in "${existing.fulfillmentStatus}" status or stock has already been restored.`,
       });
     }
 
-    order.fulfillmentStatus = 'cancelled';
-    order.cancelledAt = new Date();
-    if (cancellationReason) {
-      order.cancellationReason = cancellationReason;
-    }
-
-    // Restore stock
+    // Restore stock exactly once
     for (const item of order.items) {
       await Product.findByIdAndUpdate(item.product, { $inc: { stock: item.quantity } });
     }
-
-    await order.save();
 
     return res.status(200).json({
       success: true,

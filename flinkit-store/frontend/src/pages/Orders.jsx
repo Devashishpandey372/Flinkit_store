@@ -1,10 +1,31 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Package, Clock, CheckCircle2, XCircle, ArrowRight, Truck, FileText } from 'lucide-react';
+import { Package, Clock, CheckCircle2, XCircle, ArrowRight, Truck, FileText, CreditCard } from 'lucide-react';
 import api from '../services/api';
 import toast from 'react-hot-toast';
 import LoadingSpinner from '../components/LoadingSpinner';
 import InvoiceModal from '../components/InvoiceModal';
+
+const loadRazorpayScript = () => {
+  return new Promise((resolve) => {
+    if (typeof window !== 'undefined' && window.Razorpay) {
+      resolve(true);
+      return;
+    }
+    const existingScript = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
+    if (existingScript) {
+      existingScript.addEventListener('load', () => resolve(true));
+      existingScript.addEventListener('error', () => resolve(false));
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+};
 
 const STATUS_COLORS = {
   placed: 'bg-blue-50 text-blue-700 border-blue-200',
@@ -19,6 +40,7 @@ const Orders = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [cancellingId, setCancellingId] = useState(null);
+  const [retryingId, setRetryingId] = useState(null);
   const [invoiceOrder, setInvoiceOrder] = useState(null);
 
   const fetchOrders = async () => {
@@ -35,6 +57,67 @@ const Orders = () => {
   useEffect(() => {
     fetchOrders();
   }, []);
+
+  const handleRetryPayment = async (order) => {
+    setRetryingId(order._id);
+    try {
+      const isLoaded = await loadRazorpayScript();
+      if (!isLoaded || typeof window.Razorpay !== 'function') {
+        toast.error('Failed to load Razorpay SDK. Please check your internet connection.');
+        setRetryingId(null);
+        return;
+      }
+
+      const rzpOrderRes = await api.post('/payments/create-order', { orderId: order._id });
+      const { razorpayOrderId, amount, currency, key, user: rzpUser } = rzpOrderRes.data.data;
+
+      const options = {
+        key: key || import.meta.env.VITE_RAZORPAY_KEY_ID,
+        amount,
+        currency: currency || 'INR',
+        name: 'Flinkit',
+        description: 'Grocery Order Payment Retry',
+        image: 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=100',
+        order_id: razorpayOrderId,
+        prefill: {
+          name: rzpUser?.name || '',
+          email: rzpUser?.email || '',
+          contact: rzpUser?.phone || '',
+        },
+        theme: { color: '#16a34a' },
+        handler: async (response) => {
+          try {
+            await api.post('/payments/verify', {
+              orderId: order._id,
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            });
+            toast.success('Payment verified & order confirmed! 🎉');
+            fetchOrders();
+          } catch (err) {
+            toast.error(err.response?.data?.message || 'Payment verification failed.');
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            toast('Payment modal closed. You can retry anytime.', { icon: 'ℹ️' });
+          },
+        },
+      };
+
+      const rzp = new window.Razorpay(options);
+      rzp.on('payment.failed', (response) => {
+        const error = response.error || {};
+        toast.error(error.description || 'Payment retry failed. Please try another payment method.');
+      });
+      rzp.open();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to initiate payment retry.');
+    } finally {
+      setRetryingId(null);
+    }
+  };
 
   const handleCancelOrder = async (orderId) => {
     if (!window.confirm('Are you sure you want to cancel this order?')) return;
@@ -150,6 +233,18 @@ const Orders = () => {
                     <p className="text-xs text-gray-500">Total Amount</p>
                     <p className="text-lg font-black text-primary-600">₹{order.totalAmount}</p>
                   </div>
+
+                  {order.paymentMethod === 'online' && order.paymentStatus !== 'paid' && order.fulfillmentStatus !== 'cancelled' && (
+                    <button
+                      type="button"
+                      onClick={() => handleRetryPayment(order)}
+                      disabled={retryingId === order._id}
+                      className="text-xs bg-primary-600 hover:bg-primary-700 text-white font-bold px-3.5 py-2 rounded-xl transition-colors shadow-sm flex items-center gap-1.5"
+                      title="Pay for this order"
+                    >
+                      <CreditCard className="w-3.5 h-3.5" /> {retryingId === order._id ? 'Connecting...' : 'Pay Now'}
+                    </button>
+                  )}
 
                   <button
                     type="button"

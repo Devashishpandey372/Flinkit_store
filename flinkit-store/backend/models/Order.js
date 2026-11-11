@@ -84,6 +84,12 @@ const orderSchema = new mongoose.Schema(
     cancelledAt: { type: Date },
 
     cancellationReason: { type: String },
+
+    // Expiry, Inventory & Reconciliation tracking
+    isStockRestored: { type: Boolean, default: false },
+    expiredAt: { type: Date },
+    needsReconciliation: { type: Boolean, default: false },
+    reconciliationReason: { type: String },
   },
   {
     timestamps: true,
@@ -94,5 +100,6 @@ orderSchema.index({ user: 1, createdAt: -1 });
 orderSchema.index({ fulfillmentStatus: 1 });
 orderSchema.index({ paymentStatus: 1 });
 orderSchema.index({ razorpayOrderId: 1 });
+orderSchema.index({ paymentMethod: 1, paymentStatus: 1, fulfillmentStatus: 1, createdAt: 1 });
 
 module.exports = mongoose.model('Order', orderSchema);

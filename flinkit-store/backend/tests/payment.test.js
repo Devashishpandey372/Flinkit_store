@@ -540,4 +540,197 @@ describe('Payment API Endpoints & Webhook Idempotency', () => {
 
     process.env.NODE_ENV = origEnv;
   });
+
+  // ─── Phase 6: Payment Security Edge Cases ─────────────────────
+
+  it('POST /api/payments/verify - should reject verification if order belongs to another customer', async () => {
+    const otherUserAuth = await createTestUser();
+    const otherToken = otherUserAuth.token;
+
+    const razorpay_order_id = 'order_mock_rzp_other_user';
+    const razorpay_payment_id = 'pay_mock_other_user';
+    order.razorpayOrderId = razorpay_order_id;
+    await order.save();
+
+    const signature = crypto
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest('hex');
+
+    // Attempting to verify user A's order using user B's token
+    const res = await request(app)
+      .post('/api/payments/verify')
+      .set('Authorization', `Bearer ${otherToken}`)
+      .send({
+        orderId: order._id,
+        razorpay_order_id,
+        razorpay_payment_id,
+        razorpay_signature: signature,
+      });
+
+    expect(res.status).toBe(404);
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toMatch(/order not found/i);
+
+    // Verify order was not modified
+    const checkOrder = await Order.findById(order._id);
+    expect(checkOrder.paymentStatus).toBe('pending');
+  });
+
+  it('POST /api/payments/verify - should handle concurrent verification requests safely', async () => {
+    const razorpay_order_id = 'order_mock_rzp_concurrent_verify';
+    const razorpay_payment_id = 'pay_mock_concurrent_verify';
+    order.razorpayOrderId = razorpay_order_id;
+    await order.save();
+
+    const signature = crypto
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest('hex');
+
+    const verifyPayload = {
+      orderId: order._id,
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature: signature,
+    };
+
+    const [res1, res2] = await Promise.all([
+      request(app).post('/api/payments/verify').set('Authorization', `Bearer ${token}`).send(verifyPayload),
+      request(app).post('/api/payments/verify').set('Authorization', `Bearer ${token}`).send(verifyPayload),
+    ]);
+
+    expect(res1.status).toBe(200);
+    expect(res2.status).toBe(200);
+
+    const checkOrder = await Order.findById(order._id);
+    expect(checkOrder.paymentStatus).toBe('paid');
+    expect(checkOrder.fulfillmentStatus).toBe('confirmed');
+  });
+
+  it('POST /api/payments/webhook - should reject payment with modified/tampered amount', async () => {
+    const razorpayOrderId = 'order_webhook_amount_tamper';
+    const razorpayPaymentId = 'pay_webhook_amount_tamper';
+    const eventId = 'evt_test_amount_tamper_707';
+
+    order.razorpayOrderId = razorpayOrderId;
+    await order.save();
+
+    // Order total is ₹120 (12000 paise), but payload claims ₹50 (5000 paise)
+    const payload = {
+      id: eventId,
+      entity: 'event',
+      event: 'payment.captured',
+      payload: {
+        payment: {
+          entity: {
+            id: razorpayPaymentId,
+            order_id: razorpayOrderId,
+            amount: 5000, // Tampered amount
+            currency: 'INR',
+            status: 'captured',
+            notes: { orderId: order._id.toString() },
+          },
+        },
+      },
+    };
+
+    const rawPayload = JSON.stringify(payload);
+    const signature = crypto
+      .createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET)
+      .update(rawPayload)
+      .digest('hex');
+
+    const res = await request(app)
+      .post('/api/payments/webhook')
+      .set('x-razorpay-signature', signature)
+      .set('Content-Type', 'application/json')
+      .send(rawPayload);
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toMatch(/amount mismatch/i);
+
+    // Verify order was NOT marked as paid
+    const checkOrder = await Order.findById(order._id);
+    expect(checkOrder.paymentStatus).toBe('pending');
+  });
+
+  it('POST /api/payments/webhook - should safely acknowledge unknown webhook events without side effects', async () => {
+    const payload = {
+      id: 'evt_unknown_event_808',
+      entity: 'event',
+      event: 'payout.processed',
+      payload: {},
+    };
+
+    const rawPayload = JSON.stringify(payload);
+    const signature = crypto
+      .createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET)
+      .update(rawPayload)
+      .digest('hex');
+
+    const res = await request(app)
+      .post('/api/payments/webhook')
+      .set('x-razorpay-signature', signature)
+      .set('Content-Type', 'application/json')
+      .send(rawPayload);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.message).toMatch(/acknowledged/i);
+
+    // Verify order untouched
+    const checkOrder = await Order.findById(order._id);
+    expect(checkOrder.paymentStatus).toBe('pending');
+  });
+
+  it('POST /api/payments/webhook - should handle missing eventId using safe fallback', async () => {
+    const razorpayOrderId = 'order_webhook_fallback_id';
+    const razorpayPaymentId = 'pay_webhook_fallback_id';
+
+    order.razorpayOrderId = razorpayOrderId;
+    await order.save();
+
+    // Payload without 'id' field, and no x-razorpay-event-id header
+    const payload = {
+      entity: 'event',
+      event: 'payment.captured',
+      payload: {
+        payment: {
+          entity: {
+            id: razorpayPaymentId,
+            order_id: razorpayOrderId,
+            amount: 12000,
+            currency: 'INR',
+            status: 'captured',
+            notes: { orderId: order._id.toString() },
+          },
+        },
+      },
+    };
+
+    const rawPayload = JSON.stringify(payload);
+    const signature = crypto
+      .createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET)
+      .update(rawPayload)
+      .digest('hex');
+
+    const res = await request(app)
+      .post('/api/payments/webhook')
+      .set('x-razorpay-signature', signature)
+      .set('Content-Type', 'application/json')
+      .send(rawPayload);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+
+    const checkOrder = await Order.findById(order._id);
+    expect(checkOrder.paymentStatus).toBe('paid');
+
+    // Verify ProcessedWebhook created with fallback ID (payment.captured:pay_webhook_fallback_id)
+    const fallbackRecord = await ProcessedWebhook.findOne({ paymentId: razorpayPaymentId });
+    expect(fallbackRecord).toBeTruthy();
+    expect(fallbackRecord.eventId).toBe(`payment.captured:${razorpayPaymentId}`);
+  });
 });

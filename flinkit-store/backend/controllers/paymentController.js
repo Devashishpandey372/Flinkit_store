@@ -112,6 +112,30 @@ const verifyPayment = async (req, res, next) => {
       return res.status(200).json({ success: true, message: 'Payment already verified.', data: { order } });
     }
 
+    // Late payment edge-case: customer paid after order was cancelled or expired
+    if (order.fulfillmentStatus === 'cancelled' || order.isStockRestored || order.expiredAt) {
+      order.paymentStatus = 'paid';
+      order.razorpayPaymentId = razorpay_payment_id;
+      order.razorpaySignature = razorpay_signature;
+      order.paidAt = new Date();
+      order.needsReconciliation = true;
+      order.reconciliationReason =
+        'Payment captured after order was cancelled or expired and inventory restored';
+      await order.save();
+
+      console.warn(
+        `[Payment Verify] Late payment captured for expired/cancelled order ID: ${order._id} | Flagged for reconciliation`
+      );
+
+      return res.status(200).json({
+        success: true,
+        reconciliation: true,
+        message:
+          'Payment received, but your order had expired or was cancelled. Our team has flagged this for review or refund.',
+        data: { order },
+      });
+    }
+
     // Atomically transition from pending/failed to paid
     order.paymentStatus = 'paid';
     order.razorpayPaymentId = razorpay_payment_id;
@@ -327,6 +351,36 @@ const handleWebhook = async (req, res, next) => {
             message: 'Order was already marked as paid',
             duplicate: false,
             orderId: order._id,
+          });
+        }
+
+        // Late payment edge-case: order was cancelled or expired before payment webhook arrived
+        if (order.fulfillmentStatus === 'cancelled' || order.isStockRestored || order.expiredAt) {
+          const updatedOrder = await Order.findOneAndUpdate(
+            { _id: order._id },
+            {
+              $set: {
+                paymentStatus: 'paid',
+                razorpayPaymentId: paymentId || order.razorpayPaymentId,
+                razorpayOrderId: razorpayOrderId || order.razorpayOrderId,
+                paidAt: new Date(),
+                needsReconciliation: true,
+                reconciliationReason:
+                  'Payment captured after order was cancelled or expired and inventory restored',
+              },
+            },
+            { new: true }
+          );
+
+          console.warn(
+            `[Razorpay Webhook] LATE PAYMENT CAPTURED for expired/cancelled order ID: ${order._id} | Flagged for reconciliation`
+          );
+
+          return res.status(200).json({
+            success: true,
+            message: 'Payment captured for expired/cancelled order; flagged for reconciliation',
+            orderId: order._id,
+            reconciliation: true,
           });
         }
 
